@@ -1,3 +1,4 @@
+import math
 import tempfile
 from pathlib import Path
 import streamlit as st
@@ -18,7 +19,10 @@ from tomoscope_reconstruction import (
     load_sinogram_csv,
     reconstruct_arrays,
 )
-from tomoscope_3d import reconstruct_3d_from_images
+from tomoscope_3d import (
+    reconstruct_3d_from_images,
+    reconstruct_volume_from_sinogram_stack,
+)
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="TOMOSCOPE | 2D & 3D Optical CT", page_icon="🔬", layout="wide")
@@ -208,6 +212,148 @@ def plot_tomo_grid(image, title, xlabel, ylabel, extent, cmap="magma", aspect="e
     return fig
 
 
+def render_3d_volume_explorer(volume, x_cm, y_cm, z_cm, key_prefix="vol"):
+    """Interactive 3D point cloud, orthogonal cross-sections, and Z-slice scrubber."""
+    st.markdown("---")
+    st.subheader(f"🧊 3D Reconstructed Voxel Volume ({volume.shape[0]} Z × {volume.shape[1]} Y × {volume.shape[2]} X)")
+
+    ctrl1, ctrl2, ctrl3 = st.columns(3)
+    pct = ctrl1.slider(
+        "Voxel Display Threshold (%)",
+        min_value=75.0,
+        max_value=99.5,
+        value=94.0,
+        step=0.5,
+        key=f"{key_prefix}_pct",
+        help="Higher percentile hides faint background noise and highlights denser internal structures.",
+    )
+    azim = ctrl2.slider(
+        "3D Camera Azimuth Angle (°)",
+        min_value=-180,
+        max_value=180,
+        value=-55,
+        step=5,
+        key=f"{key_prefix}_azim",
+    )
+    elev = ctrl3.slider(
+        "3D Camera Elevation Angle (°)",
+        min_value=5,
+        max_value=85,
+        value=25,
+        step=5,
+        key=f"{key_prefix}_elev",
+    )
+
+    vc1, vc2 = st.columns(2)
+
+    # Left panel: Interactive 3D Voxel Point Cloud
+    with vc1:
+        positive = np.where(np.isfinite(volume), np.maximum(volume, 0.0), 0.0)
+        vals = positive[positive > 0]
+        fig3d = plt.figure(figsize=(5.5, 5.0))
+        fig3d.patch.set_facecolor("#ffffff")
+        ax3d = fig3d.add_subplot(111, projection="3d")
+        ax3d.set_facecolor("#f8fafc")
+
+        if vals.size >= 10:
+            threshold = float(np.percentile(vals, pct))
+            indices = np.argwhere(positive >= threshold)
+            max_pts = 35000
+            if indices.shape[0] > max_pts:
+                stride = int(math.ceil(indices.shape[0] / max_pts))
+                indices = indices[::stride]
+            vz, vy, vx = indices[:, 0], indices[:, 1], indices[:, 2]
+            colors = positive[vz, vy, vx]
+            sc = ax3d.scatter(
+                x_cm[vx], y_cm[vy], z_cm[vz],
+                c=colors, cmap="inferno", s=3.5, alpha=0.75, linewidths=0
+            )
+            cbar = fig3d.colorbar(sc, ax=ax3d, shrink=0.62, pad=0.08)
+            cbar.set_label("Relative attenuation", fontsize=8)
+            cbar.ax.tick_params(labelsize=7)
+            subtitle = f"Showing {len(indices):,} voxels ≥ {pct:.1f}th percentile"
+        else:
+            ax3d.text2D(0.12, 0.5, "Too few positive voxels to render.\nLower the threshold or check ROI.", transform=ax3d.transAxes)
+            subtitle = "No voxels above threshold"
+
+        ax3d.set_xlabel("x (cm)", fontsize=8)
+        ax3d.set_ylabel("y (cm)", fontsize=8)
+        ax3d.set_zlabel("z (cm)", fontsize=8)
+        ax3d.tick_params(labelsize=7)
+        ax3d.view_init(elev=elev, azim=azim)
+        span_x = max(float(x_cm[-1] - x_cm[0]), 1e-6)
+        span_y = max(float(y_cm[-1] - y_cm[0]), 1e-6)
+        span_z = max(float(z_cm[-1] - z_cm[0]), 1e-6)
+        ax3d.set_box_aspect((span_x, span_y, span_z))
+        ax3d.set_title(f"3D Voxel Point Cloud\n({subtitle})", fontsize=10, fontweight="bold", color="#0f172a")
+        st.pyplot(fig3d)
+        plt.close(fig3d)
+
+    # Right panel: Interactive Horizontal Z-Slice Browser
+    with vc2:
+        z_idx = st.slider(
+            "Inspect Horizontal XY Cross-Section at Height Z",
+            min_value=0,
+            max_value=len(z_cm) - 1,
+            value=len(z_cm) // 2,
+            key=f"{key_prefix}_zslice",
+        )
+        finite = volume[np.isfinite(volume)]
+        lo, hi = np.percentile(finite, [1.0, 99.5]) if finite.size > 0 else (0.0, 1.0)
+        if abs(hi - lo) < 1e-12:
+            hi = lo + 1e-9
+
+        fig_z, ax_z = plt.subplots(figsize=(5.0, 4.4))
+        fig_z.patch.set_facecolor("#ffffff")
+        im_z = ax_z.imshow(
+            volume[z_idx],
+            origin="lower",
+            extent=[float(x_cm[0]), float(x_cm[-1]), float(y_cm[0]), float(y_cm[-1])],
+            cmap="magma",
+            vmin=lo,
+            vmax=hi,
+            interpolation="nearest",
+        )
+        ax_z.set_title(
+            f"Axial XY Slice {z_idx + 1}/{len(z_cm)}  (z = {z_cm[z_idx]:.3f} cm)",
+            fontsize=10,
+            fontweight="bold",
+            color="#0f172a",
+        )
+        ax_z.set_xlabel("x (cm)", fontsize=9)
+        ax_z.set_ylabel("y (cm)", fontsize=9)
+        ax_z.tick_params(labelsize=8)
+        fig_z.colorbar(im_z, ax=ax_z, fraction=0.046, pad=0.04, label="Relative attenuation")
+        st.pyplot(fig_z)
+        plt.close(fig_z)
+
+    # Orthogonal XZ and YZ side views
+    mid_y, mid_x = len(y_cm) // 2, len(x_cm) // 2
+    ox1, ox2 = st.columns(2)
+    with ox1:
+        fig_xz = plot_tomo_grid(
+            volume[:, mid_y, :],
+            f"Front Vertical Cross-Section (XZ at y = {y_cm[mid_y]:.2f} cm)",
+            "x (cm)",
+            "z height (cm)",
+            [float(x_cm[0]), float(x_cm[-1]), float(z_cm[0]), float(z_cm[-1])],
+            aspect="auto",
+        )
+        st.pyplot(fig_xz)
+        plt.close(fig_xz)
+    with ox2:
+        fig_yz = plot_tomo_grid(
+            volume[:, :, mid_x],
+            f"Side Vertical Cross-Section (YZ at x = {x_cm[mid_x]:.2f} cm)",
+            "y (cm)",
+            "z height (cm)",
+            [float(y_cm[0]), float(y_cm[-1]), float(z_cm[0]), float(z_cm[-1])],
+            aspect="auto",
+        )
+        st.pyplot(fig_yz)
+        plt.close(fig_yz)
+
+
 def build_synthetic_scan(num_views, phantom_choice):
     """Generates exact analytical line integrals matching generate_demo_data.py."""
     width_cm = 15.0
@@ -227,7 +373,6 @@ def build_synthetic_scan(num_views, phantom_choice):
     else:
         objects = [(0.0, 0.0, 4.2, 0.25), (0.0, 0.0, 2.2, -0.20)]
 
-    # Build ground-truth phantom grid for visual comparison & RMSE
     coords = np.linspace(-width_cm / 2, width_cm / 2, resolution)
     xx, yy = np.meshgrid(coords, coords)
     phantom = np.zeros_like(xx)
@@ -235,7 +380,6 @@ def build_synthetic_scan(num_views, phantom_choice):
         phantom[(xx - cx) ** 2 + (yy - cy) ** 2 <= r ** 2] += mu
     phantom[xx ** 2 + yy ** 2 > (width_cm / 2) ** 2] = np.nan
 
-    # Compute exact chord-length sinogram
     sino = np.zeros((num_views, n_det), dtype=np.float64)
     for i, ang in enumerate(angles):
         th = np.deg2rad(ang)
@@ -254,6 +398,41 @@ def build_synthetic_scan(num_views, phantom_choice):
         source_path=Path("synthetic_demo.csv"),
     )
     return phantom, sino_data
+
+
+@st.cache_data(show_spinner=False)
+def run_3d_cylinder_demo(num_views, xy_res, filt_name):
+    """Simulates & reconstructs the 3-cylinder 3D dataset from generate_3d_demo_data.py."""
+    x_width_cm = 8.0
+    z_height_cm = 4.0
+    n_det = 160
+    z_slices = 24
+    s = np.linspace(-x_width_cm / 2, x_width_cm / 2, n_det)
+    z = np.linspace(-z_height_cm / 2, z_height_cm / 2, z_slices)
+    angles = np.linspace(0.0, 180.0, num_views, endpoint=False)
+
+    # Three cylinders with different vertical extents (matching generate_3d_demo_data.py)
+    cylinders = [
+        (-1.45, 0.70, 0.48, 0.62, -1.95, 1.95),
+        (1.45, 0.85, 0.43, 0.78, -0.85, 1.95),
+        (0.15, -1.50, 0.52, 0.70, -1.95, 0.55),
+    ]
+
+    sino_cube = np.zeros((z_slices, num_views, n_det), dtype=np.float64)
+    for ai, angle_deg in enumerate(angles):
+        theta = np.deg2rad(angle_deg)
+        for cx, cy, radius, mu, z_min, z_max in cylinders:
+            offset = s - (cx * np.cos(theta) + cy * np.sin(theta))
+            inside = np.abs(offset) < radius
+            chord = np.zeros_like(s)
+            chord[inside] = 2.0 * np.sqrt(np.maximum(0.0, radius ** 2 - offset[inside] ** 2))
+            active = (z >= z_min) & (z <= z_max)
+            sino_cube[active, ai, :] += mu * chord[None, :]
+
+    volume, x_cm, y_cm, z_cm, _ = reconstruct_volume_from_sinogram_stack(
+        sino_cube, s, angles, z, resolution=min(xy_res, 128), filter_name=filt_name
+    )
+    return volume, x_cm, y_cm, z_cm
 
 
 # =====================================================================
@@ -282,17 +461,17 @@ if mode == "Upload Real Scan Photos":
     center_y_pct = r1.number_input("Strip Centre Y %", value=50.0, min_value=0.0, max_value=100.0)
     band_height_pct = r2.number_input("Strip Height %", value=3.0, min_value=0.5, max_value=100.0)
 
-    enable_3d = st.sidebar.checkbox("Also Reconstruct Full 3D Volume", value=False)
+    st.sidebar.subheader("3D Volume Reconstruction")
+    enable_3d = st.sidebar.checkbox("Enable Full 3D Volume Reconstruction", value=True)
     if enable_3d:
         z1, z2 = st.sidebar.columns(2)
         z_top_pct = z1.number_input("3D Top ROI %", value=15.0, min_value=0.0, max_value=99.0)
         z_bottom_pct = z2.number_input("3D Bottom ROI %", value=85.0, min_value=1.0, max_value=100.0)
         object_height_cm = z1.number_input("Object Height (cm)", value=3.0, min_value=0.1, step=0.5)
-        z_slices = int(z2.number_input("Z Height Slices", value=24, min_value=8, max_value=96, step=4))
+        z_slices = int(z2.number_input("Z Height Slices", value=24, min_value=8, max_value=64, step=4))
 
     if flat_file is not None:
-        # Show live ROI preview box on the uploaded flat photo
-        with st.expander("👁️ Preview Selected Detector Strip on Flat Reference Photo", expanded=(len(proj_files) < 3)):
+        with st.expander("👁️ Preview Selected ROI Boxes on Flat Reference Photo", expanded=(len(proj_files) < 3)):
             roi_cfg = ROISettings(x_start_pct, x_end_pct, center_y_pct, band_height_pct)
             pil_flat = ImageOps.exif_transpose(Image.open(flat_file)).convert("RGB")
             w, h = pil_flat.size
@@ -304,15 +483,24 @@ if mode == "Upload Real Scan Photos":
                 if enable_3d:
                     zy0 = int(round(h * z_top_pct / 100.0))
                     zy1 = int(round(h * z_bottom_pct / 100.0))
-                    draw.rectangle([x0, zy0, x1, zy1], outline=(14, 165, 233), width=max(3, w // 300))
-                st.image(preview_img, caption="Red box = 2D central detector strip | Blue box = 3D volume region (if enabled)", use_container_width=True)
+                    draw.rectangle([x0, zy0, x1, zy1], outline=(2, 132, 199), width=max(4, w // 250))
+                st.image(
+                    preview_img,
+                    caption="Red box = 2D central strip | Blue box = Full 3D object height region",
+                    use_container_width=True,
+                )
             except Exception as roi_err:
                 st.error(str(roi_err))
 
     if flat_file is not None and len(proj_files) >= 3:
-        if st.button("🚀 Process Camera Photos & Reconstruct", type="primary", use_container_width=True):
+        btn_label = (
+            "🚀 Process Camera Photos → 2D & 3D Reconstruction"
+            if enable_3d
+            else "🚀 Process Camera Photos → 2D Reconstruction"
+        )
+        if st.button(btn_label, type="primary", use_container_width=True):
             try:
-                with st.spinner("Calibrating camera images, building sinogram, and running Filtered Backprojection..."):
+                with st.spinner("Calibrating camera images and building sinogram..."):
                     tmp_dir = Path(tempfile.mkdtemp(prefix="tomoscope_web_"))
                     flat_path = tmp_dir / flat_file.name
                     flat_path.write_bytes(flat_file.getvalue())
@@ -346,37 +534,42 @@ if mode == "Upload Real Scan Photos":
                     st.session_state["csv_bytes"] = Path(cap_res["sinogram_csv_path"]).read_bytes()
                     st.session_state["report_text"] = Path(cap_res["report_path"]).read_text(encoding="utf-8")
 
-                    if enable_3d:
-                        angles_list = [start_angle + i * step_angle for i in range(len(proj_paths))]
-                        vol_res = reconstruct_3d_from_images(
-                            flat_path=flat_path,
-                            dark_path=dark_path,
-                            projection_paths=proj_paths,
-                            angles_deg=angles_list,
-                            output_dir=session_dir / "results" / "3d_reconstruction",
-                            x_start_pct=x_start_pct,
-                            x_end_pct=x_end_pct,
-                            z_top_pct=z_top_pct,
-                            z_bottom_pct=z_bottom_pct,
-                            detector_width_cm=detector_width_cm,
-                            object_height_cm=object_height_cm,
-                            z_slices=z_slices,
-                            resolution=min(resolution, 160),
-                            filter_name=filter_name,
+                if enable_3d:
+                    prog_bar = st.progress(0.0, text="Reconstructing 3D height slices...")
+                    angles_list = [start_angle + i * step_angle for i in range(len(proj_paths))]
+                    vol_res = reconstruct_3d_from_images(
+                        flat_path=flat_path,
+                        dark_path=dark_path,
+                        projection_paths=proj_paths,
+                        angles_deg=angles_list,
+                        output_dir=session_dir / "results" / "3d_reconstruction",
+                        x_start_pct=x_start_pct,
+                        x_end_pct=x_end_pct,
+                        z_top_pct=z_top_pct,
+                        z_bottom_pct=z_bottom_pct,
+                        detector_width_cm=detector_width_cm,
+                        object_height_cm=object_height_cm,
+                        z_slices=z_slices,
+                        resolution=min(resolution, 128),
+                        filter_name=filter_name,
+                        progress_callback=lambda done, total: prog_bar.progress(
+                            done / total, text=f"Reconstructing 3D slice {done}/{total}..."
+                        ),
+                    )
+                    prog_bar.empty()
+                    with np.load(vol_res.volume_npz_path) as npz:
+                        st.session_state["vol_3d_data"] = (
+                            npz["volume"].copy(),
+                            npz["x_cm"].copy(),
+                            npz["y_cm"].copy(),
+                            npz["z_cm"].copy(),
                         )
-                        st.session_state["vol_3d"] = {
-                            "pointcloud_bytes": vol_res.pointcloud_path.read_bytes(),
-                            "orthogonal_bytes": vol_res.orthogonal_path.read_bytes(),
-                            "npz_path": str(vol_res.volume_npz_path),
-                            "shape": vol_res.shape,
-                        }
-                    else:
-                        st.session_state["vol_3d"] = None
+                else:
+                    st.session_state["vol_3d_data"] = None
             except Exception as exc:
                 st.error(f"Processing error: {exc}")
 
         if st.session_state.get("real_scan_done"):
-            cap_res = st.session_state["cap_res"]
             sino_data = st.session_state["sino_data"]
             x_cm, y_cm, bp, fbp, info = st.session_state["recon_2d"]
 
@@ -427,113 +620,110 @@ if mode == "Upload Real Scan Photos":
             with d2.expander("📄 View Camera Calibration & Quality Report"):
                 st.text(st.session_state["report_text"])
 
-            # Optional 3D Volume Output Section
-            vol_3d = st.session_state.get("vol_3d")
-            if vol_3d is not None:
-                st.markdown("---")
-                st.subheader(f"🧊 Reconstructed 3D Voxel Volume ({vol_3d['shape'][0]} × {vol_3d['shape'][1]} × {vol_3d['shape'][2]})")
-                vc1, vc2 = st.columns(2)
-                vc1.image(vol_3d["pointcloud_bytes"], caption="3D Voxel Point Cloud (98th Percentile Threshold)", use_container_width=True)
-                vc2.image(vol_3d["orthogonal_bytes"], caption="Orthogonal Cross-Sections (XY, XZ, YZ)", use_container_width=True)
-
-                if Path(vol_3d["npz_path"]).exists():
-                    with np.load(vol_3d["npz_path"]) as npz:
-                        vol_arr = npz["volume"]
-                        vx, vy, vz = npz["x_cm"], npz["y_cm"], npz["z_cm"]
-                    z_idx = st.slider("Inspect Horizontal Z-Slice (bottom to top)", 0, len(vz) - 1, len(vz) // 2)
-                    fig_z = plot_tomo_grid(
-                        vol_arr[z_idx],
-                        f"Axial XY Cross-Section at z = {vz[z_idx]:.3f} cm",
-                        "x (cm)",
-                        "y (cm)",
-                        [float(vx[0]), float(vx[-1]), float(vy[0]), float(vy[-1])],
-                    )
-                    st.pyplot(fig_z)
-                    plt.close(fig_z)
+            vol_3d_data = st.session_state.get("vol_3d_data")
+            if vol_3d_data is not None:
+                render_3d_volume_explorer(*vol_3d_data, key_prefix="real3d")
     else:
         st.info(
             "👈 Upload your **Flat Reference Photo (LED ON)** and at least **3 Projection Scan Photos** "
-            "in the left sidebar, then click **Process Camera Photos & Reconstruct** (or switch to **Demo Simulation**)."
+            "in the left sidebar, then click **Process Camera Photos** (or switch to **Demo Simulation**)."
         )
 
 
 # =====================================================================
-# MODE 2: DEMO SIMULATION (USES PARTNER'S EXACT FBP ENGINE)
+# MODE 2: DEMO SIMULATION (2D & 3D SYNTHETIC MODELS)
 # =====================================================================
 elif mode == "Demo Simulation":
     st.sidebar.header("3. Simulation Controls")
-    phantom_choice = st.sidebar.selectbox(
-        "Synthetic Phantom",
-        ["4 Circular Inclusions (Demo)", "Single Off-Center Point", "Hollow Ring"]
+    sim_dim = st.sidebar.radio(
+        "Simulation Dimension",
+        ["2D Cross-Section", "3D Voxel Volume (3 Cylinders)"]
     )
     num_views = st.sidebar.select_slider(
         "Projection Views (over 180°)",
         options=[6, 9, 18, 36, 72],
         value=36
     )
-    inspect_angle = st.sidebar.slider("Inspect Light Ray Angle θ (°)", 0, 179, 45)
 
-    phantom, sino_data = build_synthetic_scan(num_views, phantom_choice)
-    x_cm, y_cm, bp, fbp, info = reconstruct_arrays(sino_data, resolution=resolution, filter_name=filter_name)
-
-    # Calculate RMSE inside valid circular field of view
-    valid = np.isfinite(phantom) & np.isfinite(fbp)
-    p_v = phantom[valid]
-    r_v = fbp[valid]
-    p_norm = (p_v - p_v.min()) / (p_v.max() - p_v.min() + 1e-8)
-    r_norm = (r_v - r_v.min()) / (r_v.max() - r_v.min() + 1e-8)
-    rmse = float(np.sqrt(np.mean((p_norm - r_norm) ** 2)))
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Scan Views", f"{num_views} angles")
-    m2.metric("Angular Step", f"{180 / num_views:.1f}°")
-    m3.metric("Image RMSE", f"{rmse:.4f}")
-    m4.metric("Filter", filter_name)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    xy_extent = [float(x_cm[0]), float(x_cm[-1]), float(y_cm[0]), float(y_cm[-1])]
-    sino_extent = [
-        float(sino_data.detector_positions_cm[0]),
-        float(sino_data.detector_positions_cm[-1]),
-        float(sino_data.angles_deg[0]),
-        float(sino_data.angles_deg[-1]),
-    ]
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        fig1 = plot_tomo_grid(phantom, "1. Known Phantom μ(x, y)", "x (cm)", "y (cm)", xy_extent)
-        ax1 = fig1.axes[0]
-        rad = np.deg2rad(inspect_angle)
-        nx, ny = np.cos(rad), np.sin(rad)
-        dx, dy = -np.sin(rad), np.cos(rad)
-        for s_val in [-3.5, 0.0, 3.5]:
-            t = np.linspace(-8.0, 8.0, 40)
-            ax1.plot(s_val * nx + t * dx, s_val * ny + t * dy, color="#0284c7",
-                     lw=2.0 if s_val == 0 else 1.0, alpha=0.9 if s_val == 0 else 0.5)
-        ax1.annotate("", xy=(3.0 * nx, 3.0 * ny), xytext=(0, 0),
-                     arrowprops=dict(arrowstyle="->", color="#d97706", lw=2.2))
-        ax1.set_xlim(xy_extent[0], xy_extent[1])
-        ax1.set_ylim(xy_extent[2], xy_extent[3])
-        st.pyplot(fig1)
-        plt.close(fig1)
-
-    with c2:
-        fig2 = plot_tomo_grid(
-            sino_data.attenuation,
-            "2. Sinogram p(θ, s)",
-            "Detector position s (cm)",
-            "Scan angle θ (degrees)",
-            sino_extent,
-            aspect="auto",
+    if sim_dim == "2D Cross-Section":
+        phantom_choice = st.sidebar.selectbox(
+            "Synthetic Phantom",
+            ["4 Circular Inclusions (Demo)", "Single Off-Center Point", "Hollow Ring"]
         )
-        fig2.axes[0].axhline(inspect_angle, color="#0284c7", linestyle="--", lw=1.8)
-        st.pyplot(fig2)
-        plt.close(fig2)
+        inspect_angle = st.sidebar.slider("Inspect Light Ray Angle θ (°)", 0, 179, 45)
 
-    with c3:
-        fig3 = plot_tomo_grid(fbp, f"3. Filtered Backprojection ({filter_name})", "x (cm)", "y (cm)", xy_extent)
-        st.pyplot(fig3)
-        plt.close(fig3)
+        phantom, sino_data = build_synthetic_scan(num_views, phantom_choice)
+        x_cm, y_cm, bp, fbp, info = reconstruct_arrays(sino_data, resolution=resolution, filter_name=filter_name)
+
+        valid = np.isfinite(phantom) & np.isfinite(fbp)
+        p_v = phantom[valid]
+        r_v = fbp[valid]
+        p_norm = (p_v - p_v.min()) / (p_v.max() - p_v.min() + 1e-8)
+        r_norm = (r_v - r_v.min()) / (r_v.max() - r_v.min() + 1e-8)
+        rmse = float(np.sqrt(np.mean((p_norm - r_norm) ** 2)))
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Scan Views", f"{num_views} angles")
+        m2.metric("Angular Step", f"{180 / num_views:.1f}°")
+        m3.metric("Image RMSE", f"{rmse:.4f}")
+        m4.metric("Filter", filter_name)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        xy_extent = [float(x_cm[0]), float(x_cm[-1]), float(y_cm[0]), float(y_cm[-1])]
+        sino_extent = [
+            float(sino_data.detector_positions_cm[0]),
+            float(sino_data.detector_positions_cm[-1]),
+            float(sino_data.angles_deg[0]),
+            float(sino_data.angles_deg[-1]),
+        ]
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            fig1 = plot_tomo_grid(phantom, "1. Known Phantom μ(x, y)", "x (cm)", "y (cm)", xy_extent)
+            ax1 = fig1.axes[0]
+            rad = np.deg2rad(inspect_angle)
+            nx, ny = np.cos(rad), np.sin(rad)
+            dx, dy = -np.sin(rad), np.cos(rad)
+            for s_val in [-3.5, 0.0, 3.5]:
+                t = np.linspace(-8.0, 8.0, 40)
+                ax1.plot(s_val * nx + t * dx, s_val * ny + t * dy, color="#0284c7",
+                         lw=2.0 if s_val == 0 else 1.0, alpha=0.9 if s_val == 0 else 0.5)
+            ax1.annotate("", xy=(3.0 * nx, 3.0 * ny), xytext=(0, 0),
+                         arrowprops=dict(arrowstyle="->", color="#d97706", lw=2.2))
+            ax1.set_xlim(xy_extent[0], xy_extent[1])
+            ax1.set_ylim(xy_extent[2], xy_extent[3])
+            st.pyplot(fig1)
+            plt.close(fig1)
+
+        with c2:
+            fig2 = plot_tomo_grid(
+                sino_data.attenuation,
+                "2. Sinogram p(θ, s)",
+                "Detector position s (cm)",
+                "Scan angle θ (degrees)",
+                sino_extent,
+                aspect="auto",
+            )
+            fig2.axes[0].axhline(inspect_angle, color="#0284c7", linestyle="--", lw=1.8)
+            st.pyplot(fig2)
+            plt.close(fig2)
+
+        with c3:
+            fig3 = plot_tomo_grid(fbp, f"3. Filtered Backprojection ({filter_name})", "x (cm)", "y (cm)", xy_extent)
+            st.pyplot(fig3)
+            plt.close(fig3)
+
+    else:
+        with st.spinner("Reconstructing 3D multi-height cylinder volume..."):
+            vol_demo, x_cm, y_cm, z_cm = run_3d_cylinder_demo(num_views, resolution, filter_name)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Scan Views", f"{num_views} angles")
+        m2.metric("3D Volume Grid", f"{vol_demo.shape[0]}×{vol_demo.shape[1]}×{vol_demo.shape[2]}")
+        m3.metric("Physical Height", "4.0 cm")
+        m4.metric("Filter", filter_name)
+
+        render_3d_volume_explorer(vol_demo, x_cm, y_cm, z_cm, key_prefix="demo3d")
 
 
 # =====================================================================
