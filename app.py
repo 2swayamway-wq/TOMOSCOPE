@@ -95,6 +95,9 @@ st.markdown("""
     div[data-testid="stMetricValue"] div {
         color: #0284c7 !important;
         font-weight: 700 !important;
+        font-size: 22px !important;
+        white-space: normal !important;
+        line-height: 1.2 !important;
     }
 
     /* 4-Stage Process Cards */
@@ -294,7 +297,7 @@ if mode == "Demo Simulation":
     m1.metric("Scan Views", f"{num_views} angles")
     m2.metric("Angular Step", f"{180 / num_views:.1f}°")
     m3.metric("Image RMSE", f"{rmse:.4f}")
-    m4.metric("Reconstruction Filter", "Ramp (FBP)" if use_filter else "Unfiltered")
+    m4.metric("Filter", "Ramp (FBP)" if use_filter else "Unfiltered")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
