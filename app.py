@@ -1,9 +1,11 @@
+import io
 import math
 import tempfile
 from pathlib import Path
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from PIL import Image, ImageDraw, ImageOps
 
 # Import your partner's real TOMOSCOPE math & camera engines
@@ -154,7 +156,7 @@ plt.style.use("default")
 # --- HEADER ---
 st.markdown('<div class="tomo-badge">2D & 3D OPTICAL COMPUTED TOMOGRAPHY • COMPETITION MODEL</div>', unsafe_allow_html=True)
 st.title("🔬 TOMOSCOPE: Visible-Light Tomography Simulator & Scanner")
-st.caption("By Shanmukh Teja & Sai Priyam Patro • Calibrated Beer–Lambert Sinograms & Filtered Backprojection")
+st.caption("By Priyam Patro and Shanmukh Teja • Calibrated Beer–Lambert Sinograms & Filtered Backprojection")
 st.markdown("---")
 
 # --- SIDEBAR CONTROLS ---
@@ -212,98 +214,183 @@ def plot_tomo_grid(image, title, xlabel, ylabel, extent, cmap="magma", aspect="e
     return fig
 
 
-def render_3d_volume_explorer(volume, x_cm, y_cm, z_cm, key_prefix="vol"):
-    """Interactive 3D point cloud, orthogonal cross-sections, and Z-slice scrubber."""
-    st.markdown("---")
-    st.subheader(f"🧊 3D Reconstructed Voxel Volume ({volume.shape[0]} Z × {volume.shape[1]} Y × {volume.shape[2]} X)")
+def build_vpython_style_plotly(volume, x_cm, y_cm, z_cm, percentile, slice_z_val,
+                               show_voxels=True, show_plane=True, show_box=True):
+    """WebGL 3D scene matching tomoscope_vpython_viewer.py (5-band palette + Z slice plane)."""
+    palette_hex = [
+        "#145cd1",  # blue
+        "#00b8e0",  # cyan
+        "#2ed19e",  # teal/green
+        "#fab833",  # gold
+        "#fa4d1f",  # orange/red
+    ]
+    band_labels = ["Band 1 (Low)", "Band 2", "Band 3 (Mid)", "Band 4", "Band 5 (High)"]
 
-    ctrl1, ctrl2, ctrl3 = st.columns(3)
-    pct = ctrl1.slider(
+    xmin, xmax = float(x_cm[0]), float(x_cm[-1])
+    ymin, ymax = float(y_cm[0]), float(y_cm[-1])
+    zmin, zmax = float(z_cm[0]), float(z_cm[-1])
+
+    traces = []
+    displayed_count = 0
+
+    if show_voxels:
+        positive_mask = np.isfinite(volume) & (volume > 0)
+        positive_vals = volume[positive_mask]
+        if positive_vals.size >= 10:
+            threshold = float(np.percentile(positive_vals, percentile))
+            selected_flat = np.flatnonzero(positive_mask & (volume >= threshold))
+            max_points = 30000
+            if selected_flat.size > max_points:
+                rng = np.random.default_rng(1729)
+                chosen = np.sort(rng.choice(selected_flat.size, size=max_points, replace=False))
+                selected_flat = selected_flat[chosen]
+
+            iz, iy, ix = np.unravel_index(selected_flat, volume.shape)
+            intensity = volume[iz, iy, ix]
+            displayed_count = int(intensity.size)
+
+            if displayed_count > 0:
+                cuts = np.quantile(intensity, [0.2, 0.4, 0.6, 0.8])
+                band_ids = np.digitize(intensity, cuts, right=True)
+                for b_idx in range(5):
+                    mask = band_ids == b_idx
+                    if not np.any(mask):
+                        continue
+                    traces.append(
+                        go.Scatter3d(
+                            x=x_cm[ix[mask]],
+                            y=y_cm[iy[mask]],
+                            z=z_cm[iz[mask]],
+                            mode="markers",
+                            name=band_labels[b_idx],
+                            marker=dict(
+                                size=3.2,
+                                color=palette_hex[b_idx],
+                                opacity=0.92,
+                            ),
+                            hovertemplate="x: %{x:.2f} cm<br>y: %{y:.2f} cm<br>z: %{z:.2f} cm<extra></extra>",
+                        )
+                    )
+
+    if show_plane:
+        traces.append(
+            go.Surface(
+                x=[[xmin, xmax], [xmin, xmax]],
+                y=[[ymin, ymin], [ymax, ymax]],
+                z=[[slice_z_val, slice_z_val], [slice_z_val, slice_z_val]],
+                colorscale=[[0, "rgb(13, 199, 255)"], [1, "rgb(13, 199, 255)"]],
+                opacity=0.26,
+                showscale=False,
+                name=f"Slice z = {slice_z_val:.2f} cm",
+                hoverinfo="skip",
+            )
+        )
+
+    if show_box:
+        bx = [xmin, xmax, xmax, xmin, xmin, None,
+              xmin, xmax, xmax, xmin, xmin, None,
+              xmin, xmin, None, xmax, xmax, None,
+              xmax, xmax, None, xmin, xmin]
+        by = [ymin, ymin, ymax, ymax, ymin, None,
+              ymin, ymin, ymax, ymax, ymin, None,
+              ymin, ymin, None, ymin, ymin, None,
+              ymax, ymax, None, ymax, ymax]
+        bz = [zmin, zmin, zmin, zmin, zmin, None,
+              zmax, zmax, zmax, zmax, zmax, None,
+              zmin, zmax, None, zmin, zmax, None,
+              zmin, zmax, None, zmin, zmax]
+        traces.append(
+            go.Scatter3d(
+                x=bx, y=by, z=bz,
+                mode="lines",
+                name="Scan Boundary",
+                line=dict(color="rgb(85, 115, 165)", width=3),
+                hoverinfo="skip",
+            )
+        )
+
+    fig = go.Figure(data=traces)
+    fig.update_layout(
+        paper_bgcolor="rgb(6, 9, 17)",
+        plot_bgcolor="rgb(6, 9, 17)",
+        font=dict(color="#e2e8f0", size=11),
+        margin=dict(l=0, r=0, t=36, b=0),
+        height=520,
+        title=dict(
+            text=f"Interactive 3D Voxel Volume ({displayed_count:,} voxels ≥ {percentile:.1f}th pct)",
+            x=0.03,
+            font=dict(size=13, color="#f8fafc"),
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=0.01,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(15, 23, 42, 0.75)",
+            font=dict(size=10, color="#f1f5f9"),
+        ),
+        scene=dict(
+            bgcolor="rgb(6, 9, 17)",
+            aspectmode="data",
+            xaxis=dict(title="X (cm)", gridcolor="#1e293b", zerolinecolor="#334155", showbackground=False),
+            yaxis=dict(title="Y (cm)", gridcolor="#1e293b", zerolinecolor="#334155", showbackground=False),
+            zaxis=dict(title="Z Height (cm)", gridcolor="#1e293b", zerolinecolor="#334155", showbackground=False),
+        ),
+    )
+    return fig
+
+
+def render_3d_volume_explorer(volume, x_cm, y_cm, z_cm, key_prefix="vol"):
+    """Interactive VPython-style 3D canvas + Z-slice inspector + NPZ export."""
+    st.markdown("---")
+    st.subheader(f"🧊 Interactive 3D Voxel Reconstruction ({volume.shape[0]} Z × {volume.shape[1]} Y × {volume.shape[2]} X)")
+    st.caption("Mouse / Touch: Drag to orbit 360° • Scroll / Pinch to zoom • Right-drag / Shift-drag to pan")
+
+    c_top1, c_top2, c_top3, c_top4 = st.columns([2, 2, 1, 1])
+    pct = c_top1.slider(
         "Voxel Display Threshold (%)",
         min_value=75.0,
         max_value=99.5,
-        value=94.0,
+        value=90.0,
         step=0.5,
         key=f"{key_prefix}_pct",
-        help="Higher percentile hides faint background noise and highlights denser internal structures.",
     )
-    azim = ctrl2.slider(
-        "3D Camera Azimuth Angle (°)",
-        min_value=-180,
-        max_value=180,
-        value=-55,
-        step=5,
-        key=f"{key_prefix}_azim",
+    z_idx = c_top2.slider(
+        "Horizontal Height Slice Z",
+        min_value=0,
+        max_value=len(z_cm) - 1,
+        value=len(z_cm) // 2,
+        key=f"{key_prefix}_zslice",
     )
-    elev = ctrl3.slider(
-        "3D Camera Elevation Angle (°)",
-        min_value=5,
-        max_value=85,
-        value=25,
-        step=5,
-        key=f"{key_prefix}_elev",
-    )
+    show_plane = c_top3.checkbox("Slice Plane", value=True, key=f"{key_prefix}_plane")
+    show_box = c_top4.checkbox("Scan Box", value=True, key=f"{key_prefix}_box")
 
-    vc1, vc2 = st.columns(2)
+    vc1, vc2 = st.columns([1.35, 1.0])
 
-    # Left panel: Interactive 3D Voxel Point Cloud
+    # Left: Full interactive 3D WebGL scene (VPython style)
     with vc1:
-        positive = np.where(np.isfinite(volume), np.maximum(volume, 0.0), 0.0)
-        vals = positive[positive > 0]
-        fig3d = plt.figure(figsize=(5.5, 5.0))
-        fig3d.patch.set_facecolor("#ffffff")
-        ax3d = fig3d.add_subplot(111, projection="3d")
-        ax3d.set_facecolor("#f8fafc")
-
-        if vals.size >= 10:
-            threshold = float(np.percentile(vals, pct))
-            indices = np.argwhere(positive >= threshold)
-            max_pts = 35000
-            if indices.shape[0] > max_pts:
-                stride = int(math.ceil(indices.shape[0] / max_pts))
-                indices = indices[::stride]
-            vz, vy, vx = indices[:, 0], indices[:, 1], indices[:, 2]
-            colors = positive[vz, vy, vx]
-            sc = ax3d.scatter(
-                x_cm[vx], y_cm[vy], z_cm[vz],
-                c=colors, cmap="inferno", s=3.5, alpha=0.75, linewidths=0
-            )
-            cbar = fig3d.colorbar(sc, ax=ax3d, shrink=0.62, pad=0.08)
-            cbar.set_label("Relative attenuation", fontsize=8)
-            cbar.ax.tick_params(labelsize=7)
-            subtitle = f"Showing {len(indices):,} voxels ≥ {pct:.1f}th percentile"
-        else:
-            ax3d.text2D(0.12, 0.5, "Too few positive voxels to render.\nLower the threshold or check ROI.", transform=ax3d.transAxes)
-            subtitle = "No voxels above threshold"
-
-        ax3d.set_xlabel("x (cm)", fontsize=8)
-        ax3d.set_ylabel("y (cm)", fontsize=8)
-        ax3d.set_zlabel("z (cm)", fontsize=8)
-        ax3d.tick_params(labelsize=7)
-        ax3d.view_init(elev=elev, azim=azim)
-        span_x = max(float(x_cm[-1] - x_cm[0]), 1e-6)
-        span_y = max(float(y_cm[-1] - y_cm[0]), 1e-6)
-        span_z = max(float(z_cm[-1] - z_cm[0]), 1e-6)
-        ax3d.set_box_aspect((span_x, span_y, span_z))
-        ax3d.set_title(f"3D Voxel Point Cloud\n({subtitle})", fontsize=10, fontweight="bold", color="#0f172a")
-        st.pyplot(fig3d)
-        plt.close(fig3d)
-
-    # Right panel: Interactive Horizontal Z-Slice Browser
-    with vc2:
-        z_idx = st.slider(
-            "Inspect Horizontal XY Cross-Section at Height Z",
-            min_value=0,
-            max_value=len(z_cm) - 1,
-            value=len(z_cm) // 2,
-            key=f"{key_prefix}_zslice",
+        fig_3d = build_vpython_style_plotly(
+            volume,
+            x_cm,
+            y_cm,
+            z_cm,
+            percentile=pct,
+            slice_z_val=float(z_cm[z_idx]),
+            show_voxels=True,
+            show_plane=show_plane,
+            show_box=show_box,
         )
+        st.plotly_chart(fig_3d, use_container_width=True)
+
+    # Right: Corresponding 2D XY Cross-Section at the cyan slice plane
+    with vc2:
         finite = volume[np.isfinite(volume)]
         lo, hi = np.percentile(finite, [1.0, 99.5]) if finite.size > 0 else (0.0, 1.0)
         if abs(hi - lo) < 1e-12:
             hi = lo + 1e-9
 
-        fig_z, ax_z = plt.subplots(figsize=(5.0, 4.4))
+        fig_z, ax_z = plt.subplots(figsize=(4.8, 4.6))
         fig_z.patch.set_facecolor("#ffffff")
         im_z = ax_z.imshow(
             volume[z_idx],
@@ -315,8 +402,8 @@ def render_3d_volume_explorer(volume, x_cm, y_cm, z_cm, key_prefix="vol"):
             interpolation="nearest",
         )
         ax_z.set_title(
-            f"Axial XY Slice {z_idx + 1}/{len(z_cm)}  (z = {z_cm[z_idx]:.3f} cm)",
-            fontsize=10,
+            f"XY Cross-Section at z = {z_cm[z_idx]:.3f} cm ({z_idx + 1}/{len(z_cm)})",
+            fontsize=10.5,
             fontweight="bold",
             color="#0f172a",
         )
@@ -327,7 +414,7 @@ def render_3d_volume_explorer(volume, x_cm, y_cm, z_cm, key_prefix="vol"):
         st.pyplot(fig_z)
         plt.close(fig_z)
 
-    # Orthogonal XZ and YZ side views
+    # Orthogonal XZ/YZ views + NPZ archive download for local VPython
     mid_y, mid_x = len(y_cm) // 2, len(x_cm) // 2
     ox1, ox2 = st.columns(2)
     with ox1:
@@ -352,6 +439,16 @@ def render_3d_volume_explorer(volume, x_cm, y_cm, z_cm, key_prefix="vol"):
         )
         st.pyplot(fig_yz)
         plt.close(fig_yz)
+
+    npz_buf = io.BytesIO()
+    np.savez_compressed(npz_buf, volume=volume.astype(np.float32), x_cm=x_cm, y_cm=y_cm, z_cm=z_cm)
+    st.download_button(
+        "⬇️ Download 3D Voxel Archive (volume_filtered.npz for local VPython viewer)",
+        data=npz_buf.getvalue(),
+        file_name="volume_filtered.npz",
+        mime="application/octet-stream",
+        key=f"{key_prefix}_dl_npz",
+    )
 
 
 def build_synthetic_scan(num_views, phantom_choice):
@@ -411,7 +508,6 @@ def run_3d_cylinder_demo(num_views, xy_res, filt_name):
     z = np.linspace(-z_height_cm / 2, z_height_cm / 2, z_slices)
     angles = np.linspace(0.0, 180.0, num_views, endpoint=False)
 
-    # Three cylinders with different vertical extents (matching generate_3d_demo_data.py)
     cylinders = [
         (-1.45, 0.70, 0.48, 0.62, -1.95, 1.95),
         (1.45, 0.85, 0.43, 0.78, -0.85, 1.95),
