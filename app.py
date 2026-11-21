@@ -147,7 +147,7 @@ plt.style.use("default")
 # --- HEADER ---
 st.markdown('<div class="tomo-badge">2D OPTICAL COMPUTED TOMOGRAPHY • COMPETITION MODEL</div>', unsafe_allow_html=True)
 st.title("🔬 TOMOSCOPE: Visible-Light Tomography Simulator")
-st.caption("By Priyam Patro and Shanmukh Teja • Parallel-Beam Radon Transform & Filtered Backprojection")
+st.caption("By Shanmukh Teja & Sai Priyam Patro • Parallel-Beam Radon Transform & Filtered Backprojection")
 st.markdown("---")
 
 # --- SIDEBAR CONTROLS ---
