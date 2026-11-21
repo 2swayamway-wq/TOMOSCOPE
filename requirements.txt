@@ -4,3 +4,4 @@ matplotlib
 scikit-image
 Pillow
 opencv-python-headless
+plotly
