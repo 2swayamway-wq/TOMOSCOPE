@@ -332,12 +332,12 @@ else:
     else:
         st.info("Upload your **Blank Reference Photo (I₀)** and at least **2 Angle Scan Photos (I)** in the left sidebar.")
 
-# --- 4-STAGE PROCESS CARDS ---
+# --- 4-STAGE PROCESS CARDS (2x2 GRID) ---
 st.markdown("<br>", unsafe_allow_html=True)
 st.subheader("How TOMOSCOPE Works: The 4-Stage Process")
-s1, s2, s3, s4 = st.columns(4)
 
-with s1:
+row1_col1, row1_col2 = st.columns(2)
+with row1_col1:
     st.markdown("""
     <div class="stage-card">
         <div class="stage-num">Stage 1</div>
@@ -347,7 +347,7 @@ with s1:
     </div>
     """, unsafe_allow_html=True)
 
-with s2:
+with row1_col2:
     st.markdown("""
     <div class="stage-card">
         <div class="stage-num">Stage 2</div>
@@ -357,7 +357,10 @@ with s2:
     </div>
     """, unsafe_allow_html=True)
 
-with s3:
+st.markdown("<br>", unsafe_allow_html=True)
+
+row2_col1, row2_col2 = st.columns(2)
+with row2_col1:
     st.markdown("""
     <div class="stage-card">
         <div class="stage-num">Stage 3</div>
@@ -367,7 +370,7 @@ with s3:
     </div>
     """, unsafe_allow_html=True)
 
-with s4:
+with row2_col2:
     st.markdown("""
     <div class="stage-card">
         <div class="stage-num">Stage 4</div>
