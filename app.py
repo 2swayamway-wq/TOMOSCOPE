@@ -4,29 +4,115 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from skimage.transform import radon, iradon
 
-# --- PAGE CONFIG & DARK SCIENTIFIC STYLING ---
-st.set_page_config(page_title="TOMOSCOPE", page_icon="🔬", layout="wide")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="TOMOSCOPE | 2D Optical CT", page_icon="🔬", layout="wide")
 
+# --- HIGH-CONTRAST DARK THEME & DASHBOARD STYLING ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0b0f19; color: #e2e8f0; }
-    section[data-testid="stSidebar"] { background-color: #111827; border-right: 1px solid #1e293b; }
+    /* Main background and global bright text */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: #0b0f19 !important;
+        color: #f1f5f9 !important;
+    }
+
+    /* Sidebar background and bright labels */
+    section[data-testid="stSidebar"] {
+        background-color: #111827 !important;
+        border-right: 1px solid #1e293b !important;
+    }
+    section[data-testid="stSidebar"] * {
+        color: #f1f5f9 !important;
+    }
+
+    /* Fix all widget labels, radio options, captions, and markdown text */
+    label, p, span, li, div[data-testid="stWidgetLabel"] p,
+    div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stCaptionContainer"] p {
+        color: #e2e8f0 !important;
+    }
+
+    h1, h2, h3, h4 {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+
+    /* Dropdown selectbox menu fix */
+    div[data-baseweb="select"] > div {
+        background-color: #1e293b !important;
+        color: #f8fafc !important;
+        border-color: #334155 !important;
+    }
+
+    /* Top badge */
+    .tomo-badge {
+        display: inline-block;
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.4);
+        color: #38bdf8 !important;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        padding: 4px 12px;
+        border-radius: 999px;
+        margin-bottom: 8px;
+    }
+
+    /* Metric cards */
     div[data-testid="stMetric"] {
+        background-color: #111827 !important;
+        border: 1px solid #1e293b !important;
+        border-radius: 12px !important;
+        padding: 16px 20px !important;
+    }
+    div[data-testid="stMetricLabel"] p {
+        color: #94a3b8 !important;
+        font-size: 13px !important;
+    }
+    div[data-testid="stMetricValue"] div {
+        color: #38bdf8 !important;
+        font-weight: 700 !important;
+    }
+
+    /* Math info cards at bottom */
+    .math-card {
         background-color: #111827;
         border: 1px solid #1e293b;
-        border-radius: 10px;
-        padding: 14px 18px;
+        border-radius: 12px;
+        padding: 18px 20px;
+        height: 100%;
     }
-    div[data-testid="stMetricValue"] { color: #38bdf8; }
-    h1, h2, h3 { color: #f8fafc !important; }
+    .math-card h4 {
+        color: #38bdf8 !important;
+        font-size: 15px !important;
+        margin-bottom: 8px !important;
+    }
+    .math-card p {
+        color: #cbd5e1 !important;
+        font-size: 13.5px !important;
+        line-height: 1.55 !important;
+        margin: 0 !important;
+    }
+    .formula-box {
+        background-color: #0b0f19;
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-family: monospace;
+        color: #38bdf8 !important;
+        font-size: 13px;
+        margin-top: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 plt.style.use("dark_background")
 
 # --- HEADER ---
-st.title("🔬 TOMOSCOPE: 2D Optical Tomography")
-st.caption("By Shanmukh Teja & Sai Priyam Patro • Visible-Light Parallel-Beam Radon Transform & Reconstruction")
+st.markdown('<div class="tomo-badge">2D OPTICAL COMPUTED TOMOGRAPHY • COMPETITION MODEL</div>', unsafe_allow_html=True)
+st.title("TOMOSCOPE: Visible-Light Tomography Simulator")
+st.caption("By Priyam Patro and Shanmukh Teja • Parallel-Beam Radon Transform & Filtered Backprojection")
+st.markdown("---")
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("1. Data Source")
@@ -36,6 +122,7 @@ ref_photo = None
 scan_photos = []
 phantom_type = "Multi-Region Phantom"
 num_views = 36
+inspect_angle = 45
 
 if mode == "Demo Simulation":
     phantom_type = st.sidebar.selectbox(
@@ -46,6 +133,12 @@ if mode == "Demo Simulation":
         "Projection Views (over 180°)",
         options=[6, 9, 18, 36, 72],
         value=36
+    )
+    inspect_angle = st.sidebar.slider(
+        "Inspect Light Ray Angle θ (degrees)",
+        min_value=0,
+        max_value=179,
+        value=45
     )
 else:
     ref_photo = st.sidebar.file_uploader(
@@ -115,18 +208,41 @@ def run_demo_simulation(phantom_name, num_angles, use_filter):
 # =====================================================================
 
 
-def make_plot(data, title, xlabel, ylabel, extent, aspect="equal"):
-    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+def make_plot(data, title, xlabel, ylabel, extent, aspect="equal", ray_angle=None, sino_angle=None):
+    fig, ax = plt.subplots(figsize=(4.6, 4.6))
     fig.patch.set_facecolor("#111827")
     ax.set_facecolor("#0b0f19")
     im = ax.imshow(data, cmap="gray", origin="lower", extent=extent, aspect=aspect)
+
+    # Overlay parallel light rays on phantom to match interactive demo
+    if ray_angle is not None:
+        rad = np.deg2rad(ray_angle)
+        nx, ny = np.cos(rad), np.sin(rad)
+        dx, dy = -np.sin(rad), np.cos(rad)
+        for s_val in [-0.5, 0.0, 0.5]:
+            t = np.linspace(-1.2, 1.2, 50)
+            rx = s_val * nx + t * dx
+            ry = s_val * ny + t * dy
+            lw = 2.0 if s_val == 0.0 else 0.9
+            alpha = 0.95 if s_val == 0.0 else 0.45
+            ax.plot(rx, ry, color="#38bdf8", linewidth=lw, alpha=alpha)
+        ax.annotate("", xy=(0.45 * nx, 0.45 * ny), xytext=(0, 0),
+                    arrowprops=dict(arrowstyle="->", color="#f59e0b", lw=2))
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+
+    # Highlight inspected angle column on sinogram
+    if sino_angle is not None:
+        ax.axvline(sino_angle, color="#38bdf8", linestyle="--", linewidth=1.6, alpha=0.9)
+
     ax.set_title(title, fontsize=11, fontweight="bold", color="#f8fafc", pad=10)
-    ax.set_xlabel(xlabel, fontsize=9, color="#94a3b8")
-    ax.set_ylabel(ylabel, fontsize=9, color="#94a3b8")
-    ax.tick_params(colors="#64748b", labelsize=8)
+    ax.set_xlabel(xlabel, fontsize=9, color="#cbd5e1")
+    ax.set_ylabel(ylabel, fontsize=9, color="#cbd5e1")
+    ax.tick_params(colors="#94a3b8", labelsize=8)
     for spine in ax.spines.values():
-        spine.set_edgecolor("#1e293b")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        spine.set_edgecolor("#334155")
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.ax.tick_params(colors="#94a3b8", labelsize=8)
     return fig
 
 
@@ -142,15 +258,18 @@ if mode == "Demo Simulation":
     m1.metric("Scan Views", f"{num_views} angles")
     m2.metric("Angular Step", f"{180 / num_views:.1f}°")
     m3.metric("Image RMSE", f"{rmse:.4f}")
-    m4.metric("Filter", "Ramp (FBP)" if use_filter else "Unfiltered")
+    m4.metric("Reconstruction Filter", "Ramp (FBP)" if use_filter else "Unfiltered")
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        fig1 = make_plot(phantom, "1. Known Phantom μ(x, y)", "x", "y", [-1, 1, -1, 1])
+        fig1 = make_plot(phantom, "1. Known Phantom μ(x, y)", "x", "y", [-1, 1, -1, 1], ray_angle=inspect_angle)
         st.pyplot(fig1)
         plt.close(fig1)
     with c2:
-        fig2 = make_plot(sinogram, "2. Sinogram p(θ, s)", "Angle θ (degrees)", "Detector s", [0, 180, -1, 1], aspect="auto")
+        fig2 = make_plot(sinogram, "2. Sinogram p(θ, s)", "Angle θ (degrees)", "Detector position s",
+                         [0, 180, -1, 1], aspect="auto", sino_angle=inspect_angle)
         st.pyplot(fig2)
         plt.close(fig2)
     with c3:
@@ -177,10 +296,34 @@ else:
     else:
         st.info("Upload your **Blank Reference Photo (I₀)** and at least **2 Angle Scan Photos (I)** in the left sidebar.")
 
-# --- MATH REFERENCE EXPANDER ---
-with st.expander("📐 Mathematical Pipeline Behind TOMOSCOPE"):
+# --- BOTTOM MATHEMATICAL PIPELINE CARDS ---
+st.markdown("<br>", unsafe_allow_html=True)
+st.subheader("Mathematical Pipeline Behind TOMOSCOPE")
+mc1, mc2, mc3 = st.columns(3)
+
+with mc1:
     st.markdown("""
-    1. **Beer–Lambert Attenuation:** Light intensity drops exponentially through absorbing regions, so the line integral projection is calculated from transmitted intensity $I$ and blank reference intensity $I_0$ as $p(\\theta, s) = \\ln(I_0 / I)$.
-    2. **Radon Transform & Sinogram:** A single absorbing feature at $(x_0, y_0)$ traces a sinusoidal curve $s(\\theta) = x_0\\cos\\theta + y_0\\sin\\theta$ across scan angles from $0^\\circ$ to $180^\\circ$.
-    3. **Filtered Backprojection:** Applying a ramp filter in the frequency domain removes the $1/r$ blurring caused by raw backprojection before smearing measurements back across the 2D grid.
-    """)
+    <div class="math-card">
+        <h4>1. Beer–Lambert Attenuation</h4>
+        <p>As visible light crosses a semi-transparent phantom, transmitted intensity drops exponentially with internal absorption. Taking the natural log converts intensity loss into a linear line integral.</p>
+        <div class="formula-box">p(θ, s) = ln(I₀ / I) = ∫ μ(x, y) dℓ</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with mc2:
+    st.markdown("""
+    <div class="math-card">
+        <h4>2. Radon Transform & Sinogram</h4>
+        <p>Stacking projection profiles from 0° to 180° forms a sinogram. Any single point inside the object at (x₀, y₀) traces a smooth sinusoidal wave across the scan angles.</p>
+        <div class="formula-box">s(θ) = x₀ cos θ + y₀ sin θ</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with mc3:
+    st.markdown("""
+    <div class="math-card">
+        <h4>3. Filtered Backprojection</h4>
+        <p>Raw backprojection smears every measurement back along its ray, creating a 1/r blur. Applying a frequency-domain ramp filter sharpens edges before backprojecting.</p>
+        <div class="formula-box">μ̂(x, y) ≈ ∫₀^π [p(θ, s) * h(s)] dθ</div>
+    </div>
+    """, unsafe_allow_html=True)
