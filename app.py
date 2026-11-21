@@ -7,52 +7,73 @@ from skimage.transform import radon, iradon
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="TOMOSCOPE | 2D Optical CT", page_icon="🔬", layout="wide")
 
-# --- HIGH-CONTRAST DARK THEME & DASHBOARD STYLING ---
+# --- CLEAN LIGHT-MODE SCIENTIFIC STYLING ---
 st.markdown("""
 <style>
-    /* Main background and global bright text */
+    /* Force bright, crisp Light Mode across entire app */
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background-color: #0b0f19 !important;
-        color: #f1f5f9 !important;
+        background-color: #f8fafc !important;
+        color: #0f172a !important;
     }
 
-    /* Sidebar background and bright labels */
+    /* Sidebar styling */
     section[data-testid="stSidebar"] {
-        background-color: #111827 !important;
-        border-right: 1px solid #1e293b !important;
+        background-color: #ffffff !important;
+        border-right: 1px solid #e2e8f0 !important;
     }
     section[data-testid="stSidebar"] * {
-        color: #f1f5f9 !important;
+        color: #0f172a !important;
     }
 
-    /* Fix all widget labels, radio options, captions, and markdown text */
+    /* Ensure all text, labels, captions, and upload boxes are dark & legible */
     label, p, span, li, div[data-testid="stWidgetLabel"] p,
     div[data-testid="stMarkdownContainer"] p,
     div[data-testid="stCaptionContainer"] p {
-        color: #e2e8f0 !important;
+        color: #1e293b !important;
     }
 
     h1, h2, h3, h4 {
-        color: #ffffff !important;
+        color: #0f172a !important;
         font-weight: 700 !important;
     }
 
-    /* Dropdown selectbox menu fix */
-    div[data-baseweb="select"] > div {
-        background-color: #1e293b !important;
-        color: #f8fafc !important;
-        border-color: #334155 !important;
+    /* File uploader box in Light Mode */
+    [data-testid="stFileUploaderDropzone"] {
+        background-color: #f1f5f9 !important;
+        border: 1px dashed #94a3b8 !important;
+        color: #0f172a !important;
+    }
+    [data-testid="stFileUploaderDropzone"] * {
+        color: #0f172a !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button {
+        background-color: #ffffff !important;
+        color: #0284c7 !important;
+        border: 1px solid #cbd5e1 !important;
+    }
+
+    /* Dropdown selectbox & popup menu */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="popover"],
+    ul[role="listbox"],
+    li[role="option"] {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border-color: #cbd5e1 !important;
+    }
+    li[role="option"]:hover {
+        background-color: #e0f2fe !important;
     }
 
     /* Top badge */
     .tomo-badge {
         display: inline-block;
-        background: rgba(56, 189, 248, 0.12);
-        border: 1px solid rgba(56, 189, 248, 0.4);
-        color: #38bdf8 !important;
+        background: #e0f2fe;
+        border: 1px solid #7dd3fc;
+        color: #0369a1 !important;
         font-size: 12px;
         font-weight: 700;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.06em;
         padding: 4px 12px;
         border-radius: 999px;
         margin-bottom: 8px;
@@ -60,57 +81,72 @@ st.markdown("""
 
     /* Metric cards */
     div[data-testid="stMetric"] {
-        background-color: #111827 !important;
-        border: 1px solid #1e293b !important;
+        background-color: #ffffff !important;
+        border: 1px solid #e2e8f0 !important;
         border-radius: 12px !important;
         padding: 16px 20px !important;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     }
     div[data-testid="stMetricLabel"] p {
-        color: #94a3b8 !important;
+        color: #64748b !important;
         font-size: 13px !important;
+        font-weight: 600 !important;
     }
     div[data-testid="stMetricValue"] div {
-        color: #38bdf8 !important;
+        color: #0284c7 !important;
         font-weight: 700 !important;
     }
 
-    /* Math info cards at bottom */
-    .math-card {
-        background-color: #111827;
-        border: 1px solid #1e293b;
+    /* 4-Stage Process Cards */
+    .stage-card {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
         border-radius: 12px;
-        padding: 18px 20px;
+        padding: 18px;
         height: 100%;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     }
-    .math-card h4 {
-        color: #38bdf8 !important;
-        font-size: 15px !important;
-        margin-bottom: 8px !important;
+    .stage-num {
+        display: inline-block;
+        background-color: #e0f2fe;
+        color: #0369a1 !important;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        text-transform: uppercase;
     }
-    .math-card p {
-        color: #cbd5e1 !important;
+    .stage-card h4 {
+        color: #0f172a !important;
+        font-size: 16px !important;
+        margin: 2px 0 8px 0 !important;
+    }
+    .stage-card p {
+        color: #475569 !important;
         font-size: 13.5px !important;
-        line-height: 1.55 !important;
+        line-height: 1.5 !important;
         margin: 0 !important;
     }
     .formula-box {
-        background-color: #0b0f19;
-        border: 1px solid #1e293b;
+        background-color: #f1f5f9;
+        border: 1px solid #e2e8f0;
         border-radius: 8px;
-        padding: 8px 12px;
+        padding: 7px 10px;
         font-family: monospace;
-        color: #38bdf8 !important;
-        font-size: 13px;
+        color: #0369a1 !important;
+        font-size: 12.5px;
+        font-weight: 600;
         margin-top: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-plt.style.use("dark_background")
+plt.style.use("default")
 
 # --- HEADER ---
 st.markdown('<div class="tomo-badge">2D OPTICAL COMPUTED TOMOGRAPHY • COMPETITION MODEL</div>', unsafe_allow_html=True)
-st.title("TOMOSCOPE: Visible-Light Tomography Simulator")
+st.title("🔬 TOMOSCOPE: Visible-Light Tomography Simulator")
 st.caption("By Priyam Patro and Shanmukh Teja • Parallel-Beam Radon Transform & Filtered Backprojection")
 st.markdown("---")
 
@@ -210,11 +246,11 @@ def run_demo_simulation(phantom_name, num_angles, use_filter):
 
 def make_plot(data, title, xlabel, ylabel, extent, aspect="equal", ray_angle=None, sino_angle=None):
     fig, ax = plt.subplots(figsize=(4.6, 4.6))
-    fig.patch.set_facecolor("#111827")
-    ax.set_facecolor("#0b0f19")
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#f8fafc")
     im = ax.imshow(data, cmap="gray", origin="lower", extent=extent, aspect=aspect)
 
-    # Overlay parallel light rays on phantom to match interactive demo
+    # Overlay parallel light rays on phantom
     if ray_angle is not None:
         rad = np.deg2rad(ray_angle)
         nx, ny = np.cos(rad), np.sin(rad)
@@ -223,26 +259,26 @@ def make_plot(data, title, xlabel, ylabel, extent, aspect="equal", ray_angle=Non
             t = np.linspace(-1.2, 1.2, 50)
             rx = s_val * nx + t * dx
             ry = s_val * ny + t * dy
-            lw = 2.0 if s_val == 0.0 else 0.9
-            alpha = 0.95 if s_val == 0.0 else 0.45
-            ax.plot(rx, ry, color="#38bdf8", linewidth=lw, alpha=alpha)
+            lw = 2.0 if s_val == 0.0 else 1.0
+            alpha = 0.95 if s_val == 0.0 else 0.55
+            ax.plot(rx, ry, color="#0284c7", linewidth=lw, alpha=alpha)
         ax.annotate("", xy=(0.45 * nx, 0.45 * ny), xytext=(0, 0),
-                    arrowprops=dict(arrowstyle="->", color="#f59e0b", lw=2))
+                    arrowprops=dict(arrowstyle="->", color="#d97706", lw=2.2))
         ax.set_xlim(-1, 1)
         ax.set_ylim(-1, 1)
 
     # Highlight inspected angle column on sinogram
     if sino_angle is not None:
-        ax.axvline(sino_angle, color="#38bdf8", linestyle="--", linewidth=1.6, alpha=0.9)
+        ax.axvline(sino_angle, color="#0284c7", linestyle="--", linewidth=1.8, alpha=0.95)
 
-    ax.set_title(title, fontsize=11, fontweight="bold", color="#f8fafc", pad=10)
-    ax.set_xlabel(xlabel, fontsize=9, color="#cbd5e1")
-    ax.set_ylabel(ylabel, fontsize=9, color="#cbd5e1")
-    ax.tick_params(colors="#94a3b8", labelsize=8)
+    ax.set_title(title, fontsize=11, fontweight="bold", color="#0f172a", pad=10)
+    ax.set_xlabel(xlabel, fontsize=9, color="#334155")
+    ax.set_ylabel(ylabel, fontsize=9, color="#334155")
+    ax.tick_params(colors="#475569", labelsize=8)
     for spine in ax.spines.values():
-        spine.set_edgecolor("#334155")
+        spine.set_edgecolor("#cbd5e1")
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.ax.tick_params(colors="#94a3b8", labelsize=8)
+    cbar.ax.tick_params(colors="#475569", labelsize=8)
     return fig
 
 
@@ -296,34 +332,47 @@ else:
     else:
         st.info("Upload your **Blank Reference Photo (I₀)** and at least **2 Angle Scan Photos (I)** in the left sidebar.")
 
-# --- BOTTOM MATHEMATICAL PIPELINE CARDS ---
+# --- 4-STAGE PROCESS CARDS ---
 st.markdown("<br>", unsafe_allow_html=True)
-st.subheader("Mathematical Pipeline Behind TOMOSCOPE")
-mc1, mc2, mc3 = st.columns(3)
+st.subheader("How TOMOSCOPE Works: The 4-Stage Process")
+s1, s2, s3, s4 = st.columns(4)
 
-with mc1:
+with s1:
     st.markdown("""
-    <div class="math-card">
-        <h4>1. Beer–Lambert Attenuation</h4>
-        <p>As visible light crosses a semi-transparent phantom, transmitted intensity drops exponentially with internal absorption. Taking the natural log converts intensity loss into a linear line integral.</p>
-        <div class="formula-box">p(θ, s) = ln(I₀ / I) = ∫ μ(x, y) dℓ</div>
+    <div class="stage-card">
+        <div class="stage-num">Stage 1</div>
+        <h4>Geometry</h4>
+        <p>Describe every parallel light-ray path through the phantom using a normal scan angle θ and signed perpendicular distance s from the origin.</p>
+        <div class="formula-box">x cos θ + y sin θ = s</div>
     </div>
     """, unsafe_allow_html=True)
 
-with mc2:
+with s2:
     st.markdown("""
-    <div class="math-card">
-        <h4>2. Radon Transform & Sinogram</h4>
-        <p>Stacking projection profiles from 0° to 180° forms a sinogram. Any single point inside the object at (x₀, y₀) traces a smooth sinusoidal wave across the scan angles.</p>
-        <div class="formula-box">s(θ) = x₀ cos θ + y₀ sin θ</div>
+    <div class="stage-card">
+        <div class="stage-num">Stage 2</div>
+        <h4>Measurement</h4>
+        <p>Record the transmitted light intensity I leaving the sample at each angle and compare it against the unobstructed reference brightness I₀.</p>
+        <div class="formula-box">I = I₀ e^(−μL)</div>
     </div>
     """, unsafe_allow_html=True)
 
-with mc3:
+with s3:
     st.markdown("""
-    <div class="math-card">
-        <h4>3. Filtered Backprojection</h4>
-        <p>Raw backprojection smears every measurement back along its ray, creating a 1/r blur. Applying a frequency-domain ramp filter sharpens edges before backprojecting.</p>
-        <div class="formula-box">μ̂(x, y) ≈ ∫₀^π [p(θ, s) * h(s)] dθ</div>
+    <div class="stage-card">
+        <div class="stage-num">Stage 3</div>
+        <h4>Projection</h4>
+        <p>Convert the exponential light loss into a linear line measurement p(θ, s) via the Radon transform, forming wavy sinusoidal tracks in a sinogram.</p>
+        <div class="formula-box">p(θ, s) = ln(I₀ / I)</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with s4:
+    st.markdown("""
+    <div class="stage-card">
+        <div class="stage-num">Stage 4</div>
+        <h4>Reconstruction</h4>
+        <p>Solve the inverse problem by ramp-filtering and backprojecting measurements from all scan angles to estimate the 2D attenuation map μ̂(x, y).</p>
+        <div class="formula-box">μ̂(x, y) ≈ ∫₀^π q(θ, s) dθ</div>
     </div>
     """, unsafe_allow_html=True)
